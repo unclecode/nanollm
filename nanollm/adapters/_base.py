@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .._types import EmbeddingResponse, ModelResponse
+from .._types import EmbeddingResponse, ModelResponse, StreamChunk
 
 
 class BaseAdapter(ABC):
@@ -38,8 +38,8 @@ class BaseAdapter(ABC):
         ...
 
     @abstractmethod
-    def parse_stream_chunk(self, line: str, model: str = "") -> dict | None:
-        """Parse an SSE data line into a streaming chunk dict.
+    def parse_stream_chunk(self, line: str, model: str = "") -> StreamChunk | None:
+        """Parse an SSE data line into a StreamChunk.
 
         Returns None if the line should be skipped.
         """

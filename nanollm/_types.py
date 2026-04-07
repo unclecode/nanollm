@@ -138,29 +138,44 @@ def make_embedding_response(
     )
 
 
+@dataclass
+class Delta(_DictAccessMixin):
+    content: str | None = None
+    role: str | None = None
+    tool_calls: list[dict] | None = None
+
+
+@dataclass
+class StreamChoice(_DictAccessMixin):
+    delta: Delta = field(default_factory=Delta)
+    index: int = 0
+    finish_reason: str | None = None
+
+
+@dataclass
+class StreamChunk(_DictAccessMixin):
+    id: str = field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
+    choices: list[StreamChoice] = field(default_factory=list)
+    model: str = ""
+    created: int = field(default_factory=lambda: int(time.time()))
+    object: str = "chat.completion.chunk"
+
+
 def make_stream_chunk(
     content: str | None = None,
     role: str | None = None,
     finish_reason: str | None = None,
     model: str = "",
-) -> dict:
-    """Build a streaming chunk as a plain dict (matches litellm's format)."""
-    delta: dict[str, Any] = {}
-    if role is not None:
-        delta["role"] = role
-    if content is not None:
-        delta["content"] = content
-
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "delta": delta,
-                "finish_reason": finish_reason,
-            }
+) -> StreamChunk:
+    """Build a streaming chunk with dual dict/attribute access."""
+    delta = Delta(content=content, role=role)
+    return StreamChunk(
+        choices=[
+            StreamChoice(
+                delta=delta,
+                index=0,
+                finish_reason=finish_reason,
+            )
         ],
-    }
+        model=model,
+    )

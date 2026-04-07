@@ -21,7 +21,7 @@ from typing import Any
 from ._config import get_provider_config
 from ._http import async_post, async_stream, sync_post, sync_stream
 from ._router import parse_model_string, resolve, get_adapter
-from ._types import EmbeddingResponse, ModelResponse
+from ._types import EmbeddingResponse, ModelResponse, StreamChunk
 from .exceptions import (
     APIError,
     AuthenticationError,
@@ -52,17 +52,17 @@ def _resolve_api_key(
 
 
 class _SyncStreamIterator:
-    """Wraps SSE stream into an iterator of chunk dicts."""
+    """Wraps SSE stream into an iterator of StreamChunk objects."""
 
     def __init__(self, stream: Iterator[str], adapter: Any, model: str):
         self._stream = stream
         self._adapter = adapter
         self._model = model
 
-    def __iter__(self) -> Iterator[dict]:
+    def __iter__(self) -> Iterator[StreamChunk]:
         return self
 
-    def __next__(self) -> dict:
+    def __next__(self) -> StreamChunk:
         while True:
             line = next(self._stream)  # Raises StopIteration when done
             chunk = self._adapter.parse_stream_chunk(line, self._model)
@@ -71,17 +71,17 @@ class _SyncStreamIterator:
 
 
 class _AsyncStreamIterator:
-    """Wraps async SSE stream into an async iterator of chunk dicts."""
+    """Wraps async SSE stream into an async iterator of StreamChunk objects."""
 
     def __init__(self, stream: AsyncIterator[str], adapter: Any, model: str):
         self._stream = stream
         self._adapter = adapter
         self._model = model
 
-    def __aiter__(self) -> AsyncIterator[dict]:
+    def __aiter__(self) -> AsyncIterator[StreamChunk]:
         return self
 
-    async def __anext__(self) -> dict:
+    async def __anext__(self) -> StreamChunk:
         while True:
             try:
                 line = await self._stream.__anext__()
