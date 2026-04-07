@@ -1,0 +1,12 @@
+httpx[http2]>=0.27
+
+[aws]
+boto3>=1.28
+
+[dev]
+pytest>=7.0
+pytest-asyncio>=0.21
+respx>=0.21
+
+[gcp]
+google-auth>=2.0

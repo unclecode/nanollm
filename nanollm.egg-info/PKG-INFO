@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: nanollm
+Version: 0.1.0
+Summary: Minimal, zero-bloat LLM API wrapper. Drop-in replacement for litellm.
+Author-email: Unclecode <unclecode@kidocode.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/unclecode/nanollm
+Project-URL: Repository, https://github.com/unclecode/nanollm
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: httpx[http2]>=0.27
+Provides-Extra: aws
+Requires-Dist: boto3>=1.28; extra == "aws"
+Provides-Extra: gcp
+Requires-Dist: google-auth>=2.0; extra == "gcp"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21; extra == "dev"
+Requires-Dist: respx>=0.21; extra == "dev"
+Dynamic: license-file

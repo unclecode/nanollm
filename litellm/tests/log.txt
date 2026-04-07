@@ -1,6 +1,0 @@
-<litellm.utils.CustomStreamWrapper object at 0x118bd82d0>
-chunk: ModelResponse(id='chatcmpl-95b7d389-ff5a-4e09-a084-02584ba2cf1e', choices=[StreamingChoices(finish_reason=None, index=0, delta=Delta(content='In the United States of America, the Supreme Court has ultimate judicial authority, and it is the one that rules on legal disputes between the states, or on the interpretation of the', role='assistant', function_call=None, tool_calls=None), logprobs=None)], created=1711406570, model='ai21.j2-mid-v1', object='chat.completion.chunk', system_fingerprint=None, usage=Usage())
-extracted chunk: In the United States of America, the Supreme Court has ultimate judicial authority, and it is the one that rules on legal disputes between the states, or on the interpretation of the
-chunk: ModelResponse(id='chatcmpl-95b7d389-ff5a-4e09-a084-02584ba2cf1e', choices=[StreamingChoices(finish_reason='stop', index=0, delta=Delta(content=None, role=None, function_call=None, tool_calls=None), logprobs=None)], created=1711406570, model='ai21.j2-mid-v1', object='chat.completion.chunk', system_fingerprint=None, usage=Usage())
-extracted chunk: 
-completion_response: In the United States of America, the Supreme Court has ultimate judicial authority, and it is the one that rules on legal disputes between the states, or on the interpretation of the
