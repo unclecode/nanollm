@@ -18,3 +18,8 @@ packages = ["nanollm", "nanollm.providers", "litellm"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "live: marks tests that make real API calls (deselect with -m 'not live')",
+    "bedrock: marks tests that require AWS credentials",
+    "crawl4ai: marks tests that require crawl4ai to be installed",
+]

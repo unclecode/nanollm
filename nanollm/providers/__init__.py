@@ -14,6 +14,7 @@ Usage::
 
 from __future__ import annotations
 
+from threading import Lock
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,6 +22,8 @@ if TYPE_CHECKING:
 
 _REGISTRY: dict[str, type[BaseProvider]] = {}
 _INSTANCES: dict[str, BaseProvider] = {}
+_IMPORTS_DONE = False
+_IMPORT_LOCK = Lock()
 
 
 def register(name: str):
@@ -46,8 +49,7 @@ def get_provider(name: str) -> BaseProvider:
     Triggers lazy import of all provider modules on first call so that
     ``@register`` decorators run before lookup.
     """
-    if not _REGISTRY:
-        _import_all_providers()
+    _ensure_all_providers_imported()
 
     if name in _INSTANCES:
         return _INSTANCES[name]
@@ -65,9 +67,30 @@ def get_provider(name: str) -> BaseProvider:
 
 def list_providers() -> list[str]:
     """Return a sorted list of all registered provider names."""
-    if not _REGISTRY:
-        _import_all_providers()
+    _ensure_all_providers_imported()
     return sorted(_REGISTRY.keys())
+
+
+def _ensure_all_providers_imported() -> None:
+    """Import all known provider modules once per process.
+
+    The registry can become partially populated during pytest collection because
+    some test modules import provider submodules directly (for example
+    ``nanollm.providers.openai``). In that case ``_REGISTRY`` is non-empty even
+    though other providers like ``huggingface`` have not been imported yet.
+
+    Guarding on ``if not _REGISTRY`` is therefore incorrect. Track completion
+    explicitly so later lookups can finish lazy registration.
+    """
+    global _IMPORTS_DONE
+    if _IMPORTS_DONE:
+        return
+
+    with _IMPORT_LOCK:
+        if _IMPORTS_DONE:
+            return
+        _import_all_providers()
+        _IMPORTS_DONE = True
 
 
 def _import_all_providers() -> None:

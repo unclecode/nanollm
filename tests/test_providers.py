@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from nanollm.providers import get_provider, list_providers, _REGISTRY
+import nanollm.providers as providers_registry
 from nanollm.providers.base import BaseProvider
 from nanollm.providers.openai import OpenAIProvider
 from nanollm.providers.anthropic import AnthropicProvider
@@ -25,6 +26,28 @@ from nanollm._types import ModelResponse, Usage
 
 
 class TestRegistry:
+    def test_list_providers_completes_partial_registry(self):
+        """Direct submodule imports during pytest collection must not freeze the registry."""
+        saved_registry = dict(_REGISTRY)
+        saved_instances = dict(providers_registry._INSTANCES)
+        saved_done = providers_registry._IMPORTS_DONE
+        try:
+            _REGISTRY.clear()
+            providers_registry._INSTANCES.clear()
+            providers_registry._IMPORTS_DONE = False
+
+            # Simulate pytest collection leaving the registry partially populated.
+            _REGISTRY["openai"] = OpenAIProvider
+
+            providers = list_providers()
+            assert "huggingface" in providers
+        finally:
+            _REGISTRY.clear()
+            _REGISTRY.update(saved_registry)
+            providers_registry._INSTANCES.clear()
+            providers_registry._INSTANCES.update(saved_instances)
+            providers_registry._IMPORTS_DONE = saved_done
+
     def test_get_provider_openai(self):
         p = get_provider("openai")
         assert isinstance(p, OpenAIProvider)

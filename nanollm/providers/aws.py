@@ -178,7 +178,7 @@ class BedrockProvider(BaseProvider):
 
     name = "bedrock"
     base_url = ""  # Built dynamically from region
-    api_key_env = ""  # Uses AWS credentials
+    api_key_env = ""  # Uses AWS credentials (SigV4) or AWS_BEARER_TOKEN_BEDROCK
 
     _region_env = "AWS_REGION"
     _default_region = "us-east-1"
@@ -203,12 +203,53 @@ class BedrockProvider(BaseProvider):
     # -- Headers -------------------------------------------------------------
 
     def build_headers(self, api_key: str) -> dict[str, str]:
-        """Placeholder -- actual headers are built with SigV4 in build_signed_headers."""
+        """Placeholder -- actual headers are built in build_signed_headers."""
         return {"Content-Type": "application/json"}
 
     def build_signed_headers(self, url: str, body: bytes,
                              api_key: str = "", **kwargs: Any) -> dict[str, str]:
-        """Build SigV4-signed headers for Bedrock."""
+        """Build headers for Bedrock.
+
+        Auth priority (mirrors litellm):
+          1. Explicit api_key param  → Bearer token
+          2. aws_access_key_id kwarg → SigV4 with provided key pair
+          3. AWS_ACCESS_KEY_ID env   → SigV4 via env / boto3 credential chain
+          4. AWS_BEARER_TOKEN_BEDROCK env → Bearer token
+        """
+        # 1. Explicit api_key always wins as bearer token
+        if api_key:
+            return {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+
+        # 2 & 3. SigV4 — explicit kwargs take priority, then env / boto3 chain
+        access_key = kwargs.get("aws_access_key_id") or os.environ.get("AWS_ACCESS_KEY_ID", "")
+        if access_key:
+            region = self._get_region()
+            try:
+                return sigv4_headers(
+                    method="POST",
+                    url=url,
+                    body=body,
+                    region=region,
+                    service="bedrock",
+                    access_key=kwargs.get("aws_access_key_id", ""),
+                    secret_key=kwargs.get("aws_secret_access_key", ""),
+                    session_token=kwargs.get("aws_session_token", ""),
+                )
+            except Exception:
+                pass  # Fall through to bearer token if SigV4 credential resolution fails
+
+        # 4. Bearer token from env
+        bearer = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
+        if bearer:
+            return {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {bearer}",
+            }
+
+        # Last resort: attempt SigV4 via boto3 credential chain (IAM role, profile, etc.)
         region = self._get_region()
         return sigv4_headers(
             method="POST",
@@ -216,9 +257,6 @@ class BedrockProvider(BaseProvider):
             body=body,
             region=region,
             service="bedrock",
-            access_key=kwargs.get("aws_access_key_id", ""),
-            secret_key=kwargs.get("aws_secret_access_key", ""),
-            session_token=kwargs.get("aws_session_token", ""),
         )
 
     # -- URL -----------------------------------------------------------------
@@ -228,6 +266,9 @@ class BedrockProvider(BaseProvider):
                   **kwargs: Any) -> str:
         base = base_url or self._get_base_url()
         base = base.rstrip("/")
+        # Strip litellm-style "converse/" prefix if present
+        if model.startswith("converse/"):
+            model = model[len("converse/"):]
         action = "converse-stream" if stream else "converse"
         return f"{base}/model/{model}/{action}"
 

@@ -195,10 +195,10 @@ class NanoLLM:
             url, body_bytes, api_key=effective_api_key, **kwargs
         )
 
-        # Request with retry
+        # Request with retry — pass body_bytes so the exact signed bytes are sent
         data = self._retry_sync(
             lambda: sync_post(
-                url, headers, body,
+                url, headers, body_bytes,
                 timeout=effective_timeout,
                 provider=provider_name,
                 model=model_str,
@@ -264,7 +264,7 @@ class NanoLLM:
 
         data = await self._retry_async(
             lambda: async_post(
-                url, headers, body,
+                url, headers, body_bytes,
                 timeout=effective_timeout,
                 provider=provider_name,
                 model=model_str,
@@ -315,7 +315,7 @@ class NanoLLM:
         )
 
         for line in sync_stream(
-            url, headers, body,
+            url, headers, body_bytes,
             timeout=effective_timeout,
             provider=provider_name,
             model=model_str,
@@ -368,7 +368,7 @@ class NanoLLM:
         )
 
         async for line in async_stream(
-            url, headers, body,
+            url, headers, body_bytes,
             timeout=effective_timeout,
             provider=provider_name,
             model=model_str,
