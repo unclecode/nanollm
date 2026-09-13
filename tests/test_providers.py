@@ -18,6 +18,7 @@ from nanollm.providers.local import (
     OllamaProvider, OllamaChatProvider, LMStudioProvider,
     VLLMProvider, TextGenWebUIProvider,
 )
+from nanollm.providers.huggingface import HuggingFaceProvider
 from nanollm._types import ModelResponse, Usage
 
 
@@ -1050,3 +1051,284 @@ class TestProviderEdgeCases:
     def test_ollama_chat_provider(self):
         p = get_provider("ollama_chat")
         assert isinstance(p, OllamaChatProvider)
+
+
+# ── Azure Provider — build_body and response parsing ────────────────────────
+
+
+class TestAzureProviderBody:
+    """Azure-specific body and auth behaviors not covered by the config tests."""
+
+    def _messages(self):
+        return [{"role": "user", "content": "Hello"}]
+
+    def test_api_version_not_in_body(self):
+        # api_version is a URL param, not a body param — must be stripped
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {"AZURE_API_BASE": "https://r.openai.azure.com"}):
+            body = p.build_body("gpt-4", self._messages(), api_version="2024-02-01")
+        assert "api_version" not in body
+
+    def test_model_in_body(self):
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {"AZURE_API_BASE": "https://r.openai.azure.com"}):
+            body = p.build_body("gpt-4", self._messages())
+        assert body["model"] == "gpt-4"
+
+    def test_messages_in_body(self):
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {"AZURE_API_BASE": "https://r.openai.azure.com"}):
+            body = p.build_body("gpt-4", self._messages())
+        assert body["messages"] == self._messages()
+
+    def test_temperature_passes_through(self):
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {"AZURE_API_BASE": "https://r.openai.azure.com"}):
+            body = p.build_body("gpt-4", self._messages(), temperature=0.3)
+        assert body["temperature"] == 0.3
+
+    def test_parse_response_openai_format(self):
+        # Azure returns standard OpenAI-format JSON
+        p = AzureOpenAIProvider()
+        data = {
+            "id": "chatcmpl-abc",
+            "model": "gpt-4",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hi there!"},
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        response = p.parse_response(data, model="gpt-4")
+        assert response.choices[0].message.content == "Hi there!"
+        assert response.choices[0].finish_reason == "stop"
+        assert response.usage.prompt_tokens == 10
+
+    def test_parse_response_tool_calls(self):
+        p = AzureOpenAIProvider()
+        data = {
+            "id": "chatcmpl-xyz",
+            "model": "gpt-4",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"Paris"}'},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+        }
+        response = p.parse_response(data)
+        tc = response.choices[0].message.tool_calls[0]
+        assert tc.function.name == "get_weather"
+        assert tc.function.arguments == '{"city":"Paris"}'
+
+    def test_build_url_custom_api_version(self):
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {"AZURE_API_BASE": "https://r.openai.azure.com"}):
+            url = p.build_url("gpt-4", api_version="2023-05-15")
+        assert "api-version=2023-05-15" in url
+
+    def test_build_url_env_api_version(self):
+        p = AzureOpenAIProvider()
+        with patch.dict(os.environ, {
+            "AZURE_API_BASE": "https://r.openai.azure.com",
+            "AZURE_API_VERSION": "2024-01-01",
+        }):
+            url = p.build_url("gpt-4")
+        assert "api-version=2024-01-01" in url
+
+    def test_headers_use_api_key_not_bearer(self):
+        # Azure uses api-key header; Authorization: Bearer must NOT appear
+        p = AzureOpenAIProvider()
+        h = p.build_headers("secret-key")
+        assert h.get("api-key") == "secret-key"
+        assert "Authorization" not in h
+
+
+class TestAzureAIProviderBody:
+    def test_inherits_bearer_auth(self):
+        # AzureAIProvider uses standard Bearer token, not api-key
+        p = AzureAIProvider()
+        h = p.build_headers("my-token")
+        assert h["Authorization"] == "Bearer my-token"
+        assert "api-key" not in h
+
+    def test_build_body_passthrough(self):
+        p = AzureAIProvider()
+        body = p.build_body(
+            "llama-3",
+            [{"role": "user", "content": "hi"}],
+            base_url="https://ep.inference.ai.azure.com/v1",
+            temperature=0.5,
+        )
+        assert body["model"] == "llama-3"
+        assert body["temperature"] == 0.5
+
+
+# ── Vertex AI — URL structure, auth, and inherited Gemini parsing ────────────
+
+
+class TestVertexAIProvider:
+    def test_url_contains_project_and_location(self):
+        p = VertexProvider()
+        with patch.dict(os.environ, {
+            "VERTEX_PROJECT": "my-project",
+            "VERTEX_LOCATION": "us-central1",
+        }):
+            url = p.build_url("gemini-2.0-flash")
+        assert "projects/my-project" in url
+        assert "locations/us-central1" in url
+        assert "publishers/google/models/gemini-2.0-flash:generateContent" in url
+
+    def test_streaming_url_appends_alt_sse(self):
+        p = VertexProvider()
+        with patch.dict(os.environ, {
+            "VERTEX_PROJECT": "my-project",
+            "VERTEX_LOCATION": "us-central1",
+        }):
+            url = p.build_url("gemini-2.0-flash", stream=True)
+        assert "streamGenerateContent" in url
+        assert "alt=sse" in url
+
+    def test_non_streaming_url_no_alt_sse(self):
+        p = VertexProvider()
+        with patch.dict(os.environ, {
+            "VERTEX_PROJECT": "p", "VERTEX_LOCATION": "us-east1",
+        }):
+            url = p.build_url("gemini-1.5-pro", stream=False)
+        assert "generateContent" in url
+        assert "alt=sse" not in url
+        assert "streamGenerateContent" not in url
+
+    def test_headers_bearer_auth(self):
+        # Vertex uses Bearer token, not API key in URL like AI Studio
+        p = VertexProvider()
+        h = p.build_headers("my-oauth-token")
+        assert h["Authorization"] == "Bearer my-oauth-token"
+        assert "Content-Type" in h
+
+    def test_headers_no_key_no_auth_header(self):
+        p = VertexProvider()
+        h = p.build_headers("")
+        assert "Authorization" not in h
+
+    def test_parse_response_inherits_gemini(self):
+        # VertexProvider inherits GeminiProvider.parse_response
+        p = VertexProvider()
+        data = {
+            "candidates": [{
+                "content": {"parts": [{"text": "Hello from Vertex"}]},
+                "finishReason": "STOP",
+            }]
+        }
+        response = p.parse_response(data, model="gemini-2.0-flash")
+        assert response.choices[0].message.content == "Hello from Vertex"
+        assert response.choices[0].finish_reason == "stop"
+
+    def test_parse_response_max_tokens_finish_reason(self):
+        p = VertexProvider()
+        data = {
+            "candidates": [{
+                "content": {"parts": [{"text": "truncated"}]},
+                "finishReason": "MAX_TOKENS",
+            }]
+        }
+        assert p.parse_response(data).choices[0].finish_reason == "length"
+
+    def test_build_body_inherits_gemini(self):
+        # Vertex uses the same Gemini body format
+        p = VertexProvider()
+        body = p.build_body(
+            "gemini-2.0-flash",
+            [{"role": "user", "content": "hello"}],
+        )
+        assert "contents" in body
+        assert body["contents"][0]["role"] == "user"
+
+    def test_base_url_property_uses_location(self):
+        p = VertexProvider()
+        with patch.dict(os.environ, {"VERTEX_LOCATION": "europe-west4"}):
+            assert "europe-west4" in p.base_url
+
+    def test_default_location_is_us_central1(self):
+        p = VertexProvider()
+        with patch.dict(os.environ, {}, clear=True):
+            assert p._get_location() == "us-central1"
+
+
+# ── HuggingFace Provider ─────────────────────────────────────────────────────
+
+
+class TestHuggingFaceProvider:
+    def test_base_url(self):
+        p = HuggingFaceProvider()
+        assert p.base_url == "https://router.huggingface.co/v1"
+
+    def test_explicit_api_key_wins(self):
+        p = HuggingFaceProvider()
+        with patch.dict(os.environ, {"HF_TOKEN": "env-token"}):
+            assert p.get_api_key("explicit-key") == "explicit-key"
+
+    def test_hf_token_env_var(self):
+        p = HuggingFaceProvider()
+        with patch.dict(os.environ, {"HF_TOKEN": "hf-token-xyz"}, clear=True):
+            assert p.get_api_key() == "hf-token-xyz"
+
+    def test_huggingface_api_key_fallback(self):
+        # When HF_TOKEN is absent, falls back to HUGGINGFACE_API_KEY
+        p = HuggingFaceProvider()
+        env = {"HUGGINGFACE_API_KEY": "legacy-key"}
+        with patch.dict(os.environ, env, clear=True):
+            assert p.get_api_key() == "legacy-key"
+
+    def test_hf_token_takes_priority_over_huggingface_api_key(self):
+        p = HuggingFaceProvider()
+        with patch.dict(os.environ, {
+            "HF_TOKEN": "hf-preferred",
+            "HUGGINGFACE_API_KEY": "hf-legacy",
+        }):
+            assert p.get_api_key() == "hf-preferred"
+
+    def test_no_key_returns_empty_string(self):
+        p = HuggingFaceProvider()
+        with patch.dict(os.environ, {}, clear=True):
+            assert p.get_api_key() == ""
+
+    def test_inherits_openai_build_body(self):
+        p = HuggingFaceProvider()
+        body = p.build_body(
+            "Qwen/Qwen2.5-7B-Instruct",
+            [{"role": "user", "content": "hi"}],
+            temperature=0.7,
+        )
+        assert body["model"] == "Qwen/Qwen2.5-7B-Instruct"
+        assert body["temperature"] == 0.7
+        assert body["messages"][0]["content"] == "hi"
+
+    def test_inherits_openai_parse_response(self):
+        p = HuggingFaceProvider()
+        data = {
+            "id": "chatcmpl-hf",
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello!"},
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        response = p.parse_response(data)
+        assert response.choices[0].message.content == "Hello!"
+        assert response.usage.prompt_tokens == 5
+
+    def test_headers_use_bearer(self):
+        p = HuggingFaceProvider()
+        h = p.build_headers("hf-token-abc")
+        assert h["Authorization"] == "Bearer hf-token-abc"
